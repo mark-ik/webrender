@@ -2,10 +2,10 @@
 
 **Date:** 2026-09-04
 
-**Status:** RG0 through RG3 delivered; Paredros and Mesocosm consumer receipts,
-headed presentation, and Paredros rebuild-all delivered; the graph-promotion
-gate has passed; render-executor extraction is next; RG4 untriggered; RG5
-deferred
+**Status:** RG0 through RG3 and render-executor extraction delivered; Paredros
+and Mesocosm consumer receipts, headed presentation, and Paredros rebuild-all
+delivered; RG4 untriggered; RG5 deferred; broader GPU execution still gated
+on a versioned resident-buffer receipt
 
 **Prior art:**
 
@@ -43,13 +43,13 @@ AnyRender-shaped second scene authority. Borrow the adapter contract: one
 scene meaning enters every backend, and each backend either lowers it
 faithfully or returns a typed admission error.
 
-The current graph stays in `netrender` while its only real operations are
-Netrender filters and raster/composite work. A move into `netrender_device`, or
-into a sibling crate, requires a second independent execution producer to
-insert real work through the same public graph contract. A second renderer is
-enough evidence for a render-only executor. A resident compute producer such
-as Conatus/CubeCL writing a versioned buffer is stronger evidence for the
-broader unified-GPU-graph ambition. Sharing a device alone is not that proof.
+The graph began in `netrender` while its only real operations were Netrender
+filters and raster/composite work. Paredros and Mesocosm then supplied two
+independent renderer consumers through the same opaque-tenant contract. That
+was enough evidence for the render-only executor now extracted into
+`netrender_device`. A resident compute producer such as Conatus/CubeCL writing
+a versioned buffer remains the stronger evidence required for the broader
+unified-GPU-graph ambition. Sharing a device alone is not that proof.
 
 ## Why this is a continuation, not a new direction
 
@@ -767,6 +767,31 @@ emit one plan dump. Its source adapter refuses a stale producer stamp; the
 graph records and requires the exact imported token. It is evidence for a
 general execution core, not a prerequisite for RG3's renderer-tenancy proof.
 
+### Render-executor extraction: delivered
+
+Commit `93b221a5e` moves graph-local image identities, typed image accesses,
+deterministic compile/cull/lifetime planning, bound execution, and execution
+reports into `netrender_device::render_graph`. `netrender` retains Scene
+meaning, Vello realization, filter builders, and the public opaque-tenant
+envelope.
+
+The cross-crate task seam is deliberately narrower than the old internal
+callback. A producer prepares bind groups and other resources from declared
+input views, then returns commands for one executor-owned render pass. The
+producer can encode pass commands, but cannot access the raw command encoder
+or choose a different output target. Imported outputs still use the one
+validated load-preserving shape needed by RG3.
+
+The extraction preserves the existing plan dump and passes the workspace
+check, all 18 `netrender_device` unit/tenancy tests, all 12 active Netrender
+graph tests, the three-backend RG2b semantic checks and physical shared-device
+readback, and the physical RG2c fork/join receipt. Paredros also passes its
+room suite and 466-colour physical RG3 composition against the extracted path;
+Mesocosm commit `f16e802` pins the exact revision and passes its 74 active
+adapter tests, two raster tests, 18 render tests, and physical RG3 byte-match.
+The extraction adds none of the buffer/revision, reusable-template, or
+transient-pool scope reserved for later gates.
+
 ### RG4: Prepare repeated graph shapes
 
 Borrow the useful idea from `vk-graph::CommandStream`, not its Vulkan API.
@@ -859,14 +884,13 @@ without raw-hal access.
 
 ## Next implementation slice
 
-Extract the render-only graph machinery into `netrender_device`: graph-local
-IDs, typed image resources and accesses, deterministic compile/cull/lifetime
-planning, bound execution, and reports. Keep Scene meaning, Vello realization,
-filter builders, and the public opaque-tenant envelope in `netrender`. Preserve
-the current plan dumps and every RG1-RG3 receipt across the move. Do not add
-buffers, resident revision tokens, reusable templates, or a public raw encoder
-callback in this slice. The CubeCL versioned-buffer receipt remains the gate
-for broadening the extracted core beyond rendering.
+Stop at the render-only boundary until a real consumer activates another gate.
+RG4 begins only when repeated graph construction is measured as material or a
+consumer's stable topology becomes simpler as a prepared template. RG5 begins
+only when a later allocation or memory-pressure receipt crosses its recorded
+threshold. If the broader unified-GPU-graph direction is pursued, the next
+separate probe is the CubeCL versioned resident-buffer receipt above. Do not
+add buffers or compute tasks to the public core before that evidence exists.
 
 ## Acceptance summary
 

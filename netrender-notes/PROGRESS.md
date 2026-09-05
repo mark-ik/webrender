@@ -176,10 +176,10 @@ Captures elide font payloads, which is why they are 2 KB rather than
   — WebGL-over-wgpu companion lane. G0–G6 sequence, gated on
   Genet/Pelt consumer pull. Roadmap entry: G.
 - [`2026-09-04_wgpu_execution_graph_plan.md`](2026-09-04_wgpu_execution_graph_plan.md)
-  — **RG0 through RG3 delivered; RG2c passed the graph-promotion gate;
-  Paredros and Mesocosm consumer receipts, headed presentation, and Paredros
-  rebuild-all are complete; render-executor extraction is next; RG4 is
-  untriggered and RG5 deferred.** Evolves the
+  — **RG0 through RG3 and render-executor extraction delivered; RG2c passed
+  the graph-promotion gate; Paredros and Mesocosm consumer receipts, headed
+  presentation, and Paredros rebuild-all are complete; RG4 is untriggered,
+  RG5 deferred, and broader GPU execution remains gated.** Evolves the
   delivered Phase 6 filter DAG into a validated, inspectable execution plan
   over the existing shared `WgpuHandles`. `vk-graph` informs compiled GPU work;
   AnyRender informs the semantic adapter seam above it. Both are prior art,
@@ -222,7 +222,7 @@ Captures elide font payloads, which is why they are 2 KB rather than
   device-fault gate, keep optimistic scope resolution nonblocking, model
   awaited and optimistic suppression in pure reducer tests, capture a real
   scoped wgpu validation failure, and submit valid work afterward. A headed
-  headed failure through the real room surface and the shared-device rebuild
+  failure through the real headed room surface and the shared-device rebuild
   lifecycle are delivered in `3ddf1d3` and `bc452ca`. Mesocosm commits
   `bccdbac` and `6d598e3` supply the second consumer: its production Section is
   one closed opaque tenant, the receipt reports one caller submission plus one
@@ -232,10 +232,18 @@ Captures elide font payloads, which is why they are 2 KB rather than
   surface black; the fix gives each encoded draw immutable rectangle data, and
   the user confirmed the corrected build was visible. Chrome now joins the
   master before one host presentation blit, with a further 1,800-frame headed
-  run and graph-backed capture. The two renderer consumers now justify
-  extracting a render-only graph core into
-  `netrender_device` while leaving Scene/Vello/filter builders and the public
-  tenant envelope in `netrender`;
+  run and graph-backed capture. The two renderer consumers justified
+  extraction, and commit `93b221a5e` moves the typed image graph,
+  deterministic compiler/lifetime plan, bound executor, and reports into
+  `netrender_device`. The new task seam prepares resources from declared
+  inputs and returns commands for one executor-owned render pass, so producers
+  never receive the raw command encoder or choose an undeclared target.
+  Scene/Vello/filter builders and the public tenant envelope remain in
+  `netrender`. Workspace, device/tenancy, RG1/RG2b/RG2c/RG3 tests and physical
+  backend receipts remain green. Paredros repeats its room suite and 466-colour
+  physical RG3 composition through the sibling path; Mesocosm commit `f16e802`
+  pins `93b221a5e` and repeats its adapter, raster, render, and physical RG3
+  byte-match receipts;
   a future resident-buffer path must carry producer-owned revision/epoch
   metadata, and RG4 must split reusable plan structure from bound callbacks.
 - [`wasm-portability-checklist.md`](wasm-portability-checklist.md)
