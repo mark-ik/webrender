@@ -4,8 +4,8 @@
 
 **Status:** RG0 through the RG2b execution-boundary slice and RG3's Paredros
 first-consumer plus headed validation/presentation receipts delivered;
-Mesocosm and rebuild-all remain; RG2c remains the graph-promotion gate; RG5
-deferred
+Paredros rebuild-all delivered; Mesocosm remains; RG2c remains the
+graph-promotion gate; RG5 deferred
 
 **Prior art:**
 
@@ -615,8 +615,8 @@ validation scopes on the event-loop thread, and excludes native surface
 acquisition and presentation from those scopes. Optimistic frames retain local
 scope futures, drive wgpu with `PollType::Poll`, inspect each future once, and
 keep unresolved work queued rather than blocking the event loop. Pure reducer
-receipts model awaited current-frame suppression and optimistic suppression of the
-first still-unpresented frame after host observation. The room control flow
+receipts model awaited current-frame suppression and optimistic suppression of
+the first still-unpresented frame after host observation. The room control flow
 returns before surface acquisition on those dispositions. A physical wgpu
 receipt captures an out-of-bounds disposable buffer copy as the named tenant's
 validation error, then successfully submits a valid copy on the same device.
@@ -625,9 +625,19 @@ attempt IDs at actual `surface.get_current_texture` and `queue.present` calls.
 Awaited mode suppressed attempt 1 before either call and presented attempt 2.
 Optimistic mode presented attempt 1, suppressed attempt 2 after nonblocking
 observation, and presented attempt 3. Both receipts prove later recovery on the
-same shared device. Shared faults produce a distinct `RebuildAll` disposition.
-The room currently exits at that disposition; rebuilding every shared-device
-client remains open.
+same shared device.
+
+Paredros closed the shared-device rebuild lifecycle in `bc452ca`. Initial boot
+and recovery now share one constructor for the compatible adapter, device,
+queue, Renderling tenant, optional DDA tenant, Netrender composer, frame-health
+state, and host callbacks. `RebuildAll` suppresses the faulting attempt, drops
+that GPU-owned set, preserves the winit window and surface, boots a later device
+generation, reconfigures the surface, and resumes drawing. Its headed receipt
+latched a synthetic uncaptured error in generation 1: attempt 1 made no surface
+call, generation 2 acquired and presented attempt 2. This physically exercises
+the rebuild and surface paths after a synthetic shared fault. It does not claim
+to manufacture physical device loss; real uncaptured-error, poll-failure, and
+device-loss callbacks enter the same `RebuildAll` disposition.
 Netrender's internal empty-surface compositor bookkeeping also is not
 transactionally rolled back when the outer host suppresses native presentation.
 
@@ -804,10 +814,10 @@ coherent edit: expose its initialized Section display texture, place that
 opaque producer between Netrender master layers, paint HUD/chrome over it, and
 let the host blit the master to the surface. Preserve the tenant's internal
 resource topology as one closed operation and report an explicit unknown when
-its physical producer submission count is not measured. Until that checkout is
-available, the independent open slice is the shared-device `RebuildAll`
-lifecycle in Paredros. Extraction still waits for both consumers, and general
-graph promotion still waits for RG2c.
+its physical producer submission count is not measured. There is no remaining
+collision-free RG3 implementation slice while that checkout is active;
+extraction still waits for both consumers. RG2c is the separate general-graph
+promotion gate.
 
 ## Acceptance summary
 
