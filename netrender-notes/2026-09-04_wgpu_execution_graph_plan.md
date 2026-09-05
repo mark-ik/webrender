@@ -3,8 +3,9 @@
 **Date:** 2026-09-04
 
 **Status:** RG0 through the RG2b execution-boundary slice and RG3's Paredros
-first-consumer/validation plumbing delivered; headed presentation, Mesocosm,
-and rebuild-all remain; RG2c remains the graph-promotion gate; RG5 deferred
+first-consumer plus headed validation/presentation receipts delivered;
+Mesocosm and rebuild-all remain; RG2c remains the graph-promotion gate; RG5
+deferred
 
 **Prior art:**
 
@@ -606,8 +607,9 @@ logical opaque producer boundary, one graph encoder/submission, and an unknown
 caller-reported physical producer count. The normal Renderling room path now
 uses the envelope; the DDA/R1 path retains its earlier legacy composition.
 
-Paredros added the host-owned validation and presentation gate in `81a2f08`
-and made optimistic resolution nonblocking in `0bfd2f7`. The host installs
+Paredros added the host-owned validation and presentation gate in `81a2f08`,
+made optimistic resolution nonblocking in `0bfd2f7`, and closed the headed
+surface receipt in `3ddf1d3`. The host installs
 uncaptured-error and device-loss callbacks once after boot, keeps tenant
 validation scopes on the event-loop thread, and excludes native surface
 acquisition and presentation from those scopes. Optimistic frames retain local
@@ -618,10 +620,14 @@ first still-unpresented frame after host observation. The room control flow
 returns before surface acquisition on those dispositions. A physical wgpu
 receipt captures an out-of-bounds disposable buffer copy as the named tenant's
 validation error, then successfully submits a valid copy on the same device.
-This is physical scope/health evidence, not yet a headed failure injected
-through the real room surface; that presentation receipt remains open. Shared
-faults produce a distinct `RebuildAll` disposition. The room currently exits at
-that disposition; rebuilding every shared-device client remains open.
+The headed probe injects that failure into the real room scope and records the
+attempt IDs at actual `surface.get_current_texture` and `queue.present` calls.
+Awaited mode suppressed attempt 1 before either call and presented attempt 2.
+Optimistic mode presented attempt 1, suppressed attempt 2 after nonblocking
+observation, and presented attempt 3. Both receipts prove later recovery on the
+same shared device. Shared faults produce a distinct `RebuildAll` disposition.
+The room currently exits at that disposition; rebuilding every shared-device
+client remains open.
 Netrender's internal empty-surface compositor bookkeeping also is not
 transactionally rolled back when the outer host suppresses native presentation.
 
@@ -793,15 +799,15 @@ without raw-hal access.
 
 ## Next implementation slice
 
-Implement RG3's first real tenant frame with Paredros: import its caller-owned
-color target, declare its actual encoder-participating or opaque producer
-boundary, compose it into Netrender's master texture, and report tenant,
-producer path, and submission count over one `WgpuHandles`. Preserve the
-tenant's internal resource topology as one closed operation. Error attribution
-and presentation commitment must follow RG3's awaited or latched policy rather
-than becoming implicit global callbacks. Mesocosm then repeats the contract
-without a product-specific graph type. Extraction still waits for both
-consumers.
+Complete RG3's second consumer when Mesocosm's active render WIP can accept a
+coherent edit: expose its initialized Section display texture, place that
+opaque producer between Netrender master layers, paint HUD/chrome over it, and
+let the host blit the master to the surface. Preserve the tenant's internal
+resource topology as one closed operation and report an explicit unknown when
+its physical producer submission count is not measured. Until that checkout is
+available, the independent open slice is the shared-device `RebuildAll`
+lifecycle in Paredros. Extraction still waits for both consumers, and general
+graph promotion still waits for RG2c.
 
 ## Acceptance summary
 
