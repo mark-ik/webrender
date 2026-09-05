@@ -57,6 +57,8 @@ mod filter_chain;
 mod filter_passes;
 mod filters;
 mod rg2b;
+#[allow(dead_code)]
+pub(crate) mod rg2c;
 
 pub(crate) use rg2b::RasterExecution;
 

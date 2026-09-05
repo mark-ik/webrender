@@ -11,6 +11,7 @@ mod p9a_clip_rectangle;
 mod p9b_box_shadow;
 mod p9c_clip_fast_path;
 mod rg2b;
+mod rg2c;
 mod rg3_imported_output;
 mod rg3a_opaque_tenant;
 mod rg_measurement;
