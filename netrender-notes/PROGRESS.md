@@ -176,10 +176,10 @@ Captures elide font payloads, which is why they are 2 KB rather than
   — WebGL-over-wgpu companion lane. G0–G6 sequence, gated on
   Genet/Pelt consumer pull. Roadmap entry: G.
 - [`2026-09-04_wgpu_execution_graph_plan.md`](2026-09-04_wgpu_execution_graph_plan.md)
-  — **RG0 through the RG2b execution-boundary slice and RG3's Paredros
-  first-consumer/validation plumbing delivered; headed presentation,
-  Mesocosm, and rebuild-all remain; RG2c remains the graph-promotion gate; RG5
-  deferred.** Evolves the
+  — **RG0 through RG3 delivered; RG2c passed the graph-promotion gate;
+  Paredros and Mesocosm consumer receipts, headed presentation, and Paredros
+  rebuild-all are complete; render-executor extraction is next; RG4 is
+  untriggered and RG5 deferred.** Evolves the
   delivered Phase 6 filter DAG into a validated, inspectable execution plan
   over the existing shared `WgpuHandles`. `vk-graph` informs compiled GPU work;
   AnyRender informs the semantic adapter seam above it. Both are prior art,
@@ -222,14 +222,20 @@ Captures elide font payloads, which is why they are 2 KB rather than
   device-fault gate, keep optimistic scope resolution nonblocking, model
   awaited and optimistic suppression in pure reducer tests, capture a real
   scoped wgpu validation failure, and submit valid work afterward. A headed
-  failure injected through the real room surface remains
-  open, as do shared-fault reconstruction and the Mesocosm second-consumer
-  receipt. Mesocosm's current production seam is known, but its active app,
-  section, camera, body, tracer, and render files are part of a 112-path dirty
-  checkout. The second-consumer edit is deferred at that collision boundary;
-  an `origin/main` worktree would not represent the current app. Extraction
-  still requires a second independent execution producer and RG2c's multi-input
-  proof;
+  headed failure through the real room surface and the shared-device rebuild
+  lifecycle are delivered in `3ddf1d3` and `bc452ca`. Mesocosm commits
+  `bccdbac` and `6d598e3` supply the second consumer: its production Section is
+  one closed opaque tenant, the receipt reports one caller submission plus one
+  graph batch and submission, and graph-backed replay preserves the recorded
+  world hash. Its
+  first headed run found a shared composite-uniform overwrite that made the
+  surface black; the fix gives each encoded draw immutable rectangle data, and
+  the user confirmed the corrected build was visible. Chrome now joins the
+  master before one host presentation blit, with a further 1,800-frame headed
+  run and graph-backed capture. The two renderer consumers now justify
+  extracting a render-only graph core into
+  `netrender_device` while leaving Scene/Vello/filter builders and the public
+  tenant envelope in `netrender`;
   a future resident-buffer path must carry producer-owned revision/epoch
   metadata, and RG4 must split reusable plan structure from bound callbacks.
 - [`wasm-portability-checklist.md`](wasm-portability-checklist.md)

@@ -2,9 +2,10 @@
 
 **Date:** 2026-09-04
 
-**Status:** RG0 through RG2c and RG3's Paredros first-consumer plus headed
-validation/presentation receipts delivered; Paredros rebuild-all delivered;
-Mesocosm remains; the graph-promotion gate has passed; RG5 deferred
+**Status:** RG0 through RG3 delivered; Paredros and Mesocosm consumer receipts,
+headed presentation, and Paredros rebuild-all delivered; the graph-promotion
+gate has passed; render-executor extraction is next; RG4 untriggered; RG5
+deferred
 
 **Prior art:**
 
@@ -660,20 +661,42 @@ device-loss callbacks enter the same `RebuildAll` disposition.
 Netrender's internal empty-surface compositor bookkeeping also is not
 transactionally rolled back when the outer host suppresses native presentation.
 
-Mesocosm's collision boundary cleared on 2026-09-05. Its body generation,
-vertical camera cut-wall, and keyboard inspection work are committed through
-`c507ff7`, and its production `mesocosm-genet` render paths are available for a
-focused RG3 edit. Fifty-two remaining dirty paths are recorded as pre-existing
-trailing-comma formatting in
-`C:/Users/mark_/Code/testing/mesocosm/vb3_inspection/remaining_paths.json` and
-must remain outside the integration commit. In the current path, `Section`
-owns the traced/display textures, copies into its sRGB display texture, and
-composites it directly to the acquired surface. `Chrome` renders HUD rasters
-through Netrender but also blends them into that caller-owned surface encoder;
-there is not yet a production Netrender master/tenant boundary. The next slice
-is therefore to expose the initialized section display texture, move final
-composition to the Netrender master, place the section as the opaque tenant,
-paint the HUD/chrome over it, then let the host blit the master to the surface.
+Mesocosm adopted the same envelope in `bccdbac`, with final master composition
+completed in `6d598e3`. `Section::render` now finishes
+the traced world in its tenant-owned sRGB display texture and submits that
+closed producer once. Netrender imports it as `mesocosm-section`, composites it
+into an RGBA8 unorm master through one private graph batch/submission, and
+reports the producer path, fallback count, boundary zero, and the caller's
+measured physical submission count of one. Mesocosm then paints its existing
+HUD/chrome lanes into that master, and the host blits only the completed master
+to the surface. The capture path starts from a fresh Netrender master and adds
+chrome there too, so replay evidence cannot silently bypass the production
+boundary.
+
+Genet and Mere still expose Netrender's older paint-list source identity.
+Mesocosm therefore carries one temporary current-Netrender facade beside the
+older UI-raster facade. Both clone the exact same `Instance`, `Adapter`,
+`Device`, and `Queue`; there is still one physical wgpu authority. Pin
+alignment removes the compatibility facade without changing the tenant
+contract.
+
+The NVIDIA RTX 4060/Vulkan physical receipt uses an sRGB tenant, an RGBA8 unorm
+master, and a BGRA8 sRGB presentation target. Tenant-to-master bytes match the
+direct boundary-zero composite exactly. The extra 8-bit presentation
+conversion differs from the old direct-to-surface path by at most three
+channel levels in the synthetic receipt and five after world plus chrome in
+the 1920 x 1080 historical replay. That replay completed 856 steps over 219
+frames at the recorded
+`17ce02e24e152591` state hash. The first headed run exposed a real host bug:
+the master and chrome draws reused one queue-written rectangle uniform, so GPU
+execution saw only the final panel's rectangle and the window appeared black.
+`Composite` now gives every encoded draw immutable rectangle data. The
+strengthened physical test exercises a master plus later chrome draw. The user
+confirmed the corrected headed build kept the terrarium visible; after chrome
+was tightened into the master, a further 1,800-frame headed run and its
+graph-backed capture retained the world and chrome. Mesocosm's 74 host tests,
+two raster tests, and 18 renderer tests remain green. The pre-existing
+formatting paths stayed outside the focused commits.
 
 RG3 first treats each tenant's internal buffer copies, 3D textures, resident
 compute, and depth composition as one closed tenant operation. It does not
@@ -720,10 +743,17 @@ diagnostic mode, or suppresses the first still-unpresented frame after host
 observation in optimistic mode. Mesocosm repeats the contract without a
 product-specific graph type.
 
-After both consumers pass, decide whether the neutral graph core belongs in
-`netrender_device`. Netrender-specific Vello/filter builders remain in
-`netrender` either way. If the intended destination is broader than a render
-executor, require one additional cross-stack receipt before extraction:
+**Done condition met:** Paredros and Mesocosm now use the same public envelope
+without a product-specific graph type, preserve their legacy visible result
+within the stated format boundary, and report separate logical, graph, and
+producer execution counts.
+
+The two independent renderer consumers are enough evidence to move the neutral
+image execution core into `netrender_device` as a render executor.
+Netrender-specific Vello/filter builders and the opaque-tenant scene envelope
+remain in `netrender`. This does not yet justify calling the extracted core a
+general GPU graph. If that broader destination is wanted, require one
+additional cross-stack receipt:
 
 ```text
 CubeCL opaque submission
@@ -829,14 +859,14 @@ without raw-hal access.
 
 ## Next implementation slice
 
-Complete RG3's second consumer in Mesocosm: expose its initialized Section
-display texture, place that opaque producer between Netrender master layers,
-paint HUD/chrome over it, and let the host blit the master to the surface.
-Preserve the tenant's internal resource topology as one closed operation and
-report an explicit unknown when its physical producer submission count is not
-measured. Keep the 52 formatting-only paths out of the focused commit.
-Extraction still waits for this second consumer; RG2c has separately passed
-the multi-input graph-promotion gate.
+Extract the render-only graph machinery into `netrender_device`: graph-local
+IDs, typed image resources and accesses, deterministic compile/cull/lifetime
+planning, bound execution, and reports. Keep Scene meaning, Vello realization,
+filter builders, and the public opaque-tenant envelope in `netrender`. Preserve
+the current plan dumps and every RG1-RG3 receipt across the move. Do not add
+buffers, resident revision tokens, reusable templates, or a public raw encoder
+callback in this slice. The CubeCL versioned-buffer receipt remains the gate
+for broadening the extracted core beyond rendering.
 
 ## Acceptance summary
 
