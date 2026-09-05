@@ -642,18 +642,18 @@ Netrender's internal empty-surface compositor bookkeeping also is not
 transactionally rolled back when the outer host suppresses native presentation.
 
 Mesocosm's second-consumer edit is paused at an explicit collision boundary.
-Its live checkout has 112 dirty paths, including the active `mesocosm-genet`
-app, section, camera, played-body, tracer, and render files. In that current
-path, `Section` owns the traced/display textures, copies into its sRGB display
-texture, and composites it directly to the acquired surface. `Chrome` renders
-HUD rasters through Netrender but also blends them into that caller-owned
-surface encoder; there is not yet a production Netrender master/tenant
-boundary. The eventual slice is therefore to expose the initialized section
-display texture, move final composition to the Netrender master, place the
-section as the opaque tenant, paint the HUD/chrome over it, then let the host
-blit the master to the surface. A clean `origin/main` worktree would miss the
-load-bearing body, camera, and section WIP, so it is not accepted as evidence
-for the current app.
+Its 2026-09-05 live checkout has 73 dirty paths and is two local commits ahead
+of `origin/main`; 14 dirty paths are inside `mesocosm-genet`, including its app,
+section, played-body, and new inspection work. In that current path, `Section`
+owns the traced/display textures, copies into its sRGB display texture, and
+composites it directly to the acquired surface. `Chrome` renders HUD rasters
+through Netrender but also blends them into that caller-owned surface encoder;
+there is not yet a production Netrender master/tenant boundary. The eventual
+slice is therefore to expose the initialized section display texture, move
+final composition to the Netrender master, place the section as the opaque
+tenant, paint the HUD/chrome over it, then let the host blit the master to the
+surface. A clean `origin/main` worktree would miss the load-bearing current app
+and section WIP, so it is not accepted as evidence for the current app.
 
 RG3 first treats each tenant's internal buffer copies, 3D textures, resident
 compute, and depth composition as one closed tenant operation. It does not
