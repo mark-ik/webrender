@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::filter::{blur_pass_callback, make_bilinear_sampler};
-use crate::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
+use netrender_device::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
 use crate::{ColorLoad, ImageKey, NO_CLIP, NetrenderOptions, Scene, boot, create_netrender_instance};
 
 const DIM: u32 = 64;

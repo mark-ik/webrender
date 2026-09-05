@@ -4,7 +4,7 @@ version = "0.1.2"
 license = "MPL-2.0"
 repository = "https://github.com/merely-made/netrender"
 readme = "../README.md"
-description = "wgpu-native device foundation for the netrender paint engine: adapter/device/queue ownership, surface and texture plumbing."
+description = "wgpu-native device foundation for netrender: shared device ownership, typed image execution, surfaces, and pipelines."
 edition = "2021"
 
 [features]
@@ -30,3 +30,4 @@ pollster = "0.4"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { workspace = true, features = ["webgpu"] }
+web-time = "1"

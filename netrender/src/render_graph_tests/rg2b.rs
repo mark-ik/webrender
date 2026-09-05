@@ -12,7 +12,9 @@
 //! participation labels can feed one downstream image topology. It does not
 //! claim that sparse backends silently execute Classic's filter preprocessor.
 
-use crate::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
+use netrender_device::render_graph::{
+    ImageLoad, ImageUse, RenderGraph, TransientImageDesc, image_render_commands,
+};
 use crate::renderer::RasterExecution;
 
 #[cfg(all(feature = "vello-all", not(target_arch = "wasm32")))]
@@ -40,30 +42,13 @@ fn labeled_plan(execution: RasterExecution) -> String {
             "rg2b downstream composite",
             vec![ImageUse::sampled_read(input)],
             ImageUse::color_attachment(output, ImageLoad::Clear),
-            Box::new(|_device, encoder, _inputs, output| {
-                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("rg2b downstream composite"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: output,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-            }),
+            Box::new(|_device, _inputs| image_render_commands(|_pass| {})),
         )
         .expect("RG2b downstream fixture task");
     graph
         .compile(&[output])
         .expect("RG2b downstream fixture plan")
-        .with_raster_execution(execution)
+        .with_diagnostic_header(execution.dump())
         .dump()
 }
 
@@ -146,9 +131,9 @@ fn downstream_plan(
     producer: wgpu::Texture,
     execution: RasterExecution,
 ) -> (
-    crate::render_graph::ExecutionPlan,
-    crate::render_graph::ImageNode,
-    crate::render_graph::ImageNode,
+    netrender_device::render_graph::ExecutionPlan,
+    netrender_device::render_graph::ImageNode,
+    netrender_device::render_graph::ImageNode,
     wgpu::Texture,
 ) {
     use crate::filter::{blur_pass_callback, make_bilinear_sampler};
@@ -184,7 +169,7 @@ fn downstream_plan(
     let plan = graph
         .compile(&[output])
         .expect("RG2b downstream plan")
-        .with_raster_execution(execution);
+        .with_diagnostic_header(execution.dump());
     (plan, input, output, producer)
 }
 

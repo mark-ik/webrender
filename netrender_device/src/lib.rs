@@ -9,8 +9,9 @@
 //! Phase 0.5 of the netrender design plan
 //! ([`netrender-notes/2026-04-30_netrender_design_plan.md`](../../netrender-notes/2026-04-30_netrender_design_plan.md))
 //! splits the wgpu skeleton out of `netrender` into this foundation
-//! crate so the renderer-internal types can't leak into consumers
-//! that only need the device + render-graph pipeline factories.
+//! crate so renderer-internal types do not leak into consumers that only need
+//! the shared device, typed image execution, and render-graph pipeline
+//! factories.
 //!
 //! The crate's primary purpose post-batched-rasterizer-cleanup:
 //! provide the [`BrushBlurPipeline`] and [`ClipRectanglePipeline`]
@@ -32,6 +33,9 @@
 //! - [`GradientKind`] — kind tag used by `netrender::SceneGradient`
 //!   and the vello rasterizer; lives here so `netrender_device` can
 //!   stay independent of `netrender`'s scene types.
+//! - [`render_graph`] — graph-local image handles, typed accesses,
+//!   deterministic compile/cull/lifetime planning, and bound render-pass
+//!   execution over a caller-owned or executor-owned command encoder.
 
 #![allow(
     clippy::unreadable_literal,
@@ -48,6 +52,7 @@ pub(crate) mod core;
 pub(crate) mod frame;
 pub(crate) mod pipeline;
 pub(crate) mod readback;
+pub mod render_graph;
 pub(crate) mod shader;
 
 pub use crate::adapter::WgpuDevice;

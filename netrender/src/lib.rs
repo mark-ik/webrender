@@ -34,7 +34,6 @@ pub mod hit_test;
 pub mod interpolate;
 pub mod profiling;
 pub mod registry;
-mod render_graph;
 #[cfg(test)]
 mod render_graph_tests;
 mod renderer;

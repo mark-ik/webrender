@@ -35,7 +35,7 @@ API; the first release containing that change must publish `netrender` as
   vello's GPU compute path; an opt-in canary test fires when it clears).
 
 Crates: `netrender` (Scene vocabulary, rasterizer, tile cache, hit testing,
-`Renderer`), `netrender_device` (device boot and pipelines), `netrender_text`
+`Renderer`), `netrender_device` (device boot, typed image execution, and pipelines), `netrender_text`
 (parley-to-Scene glyph runs), `paint_list_api` (the engine-facing `PaintCmd`
 vocabulary), `paint_list_render` (the translator into `Scene`). Notes and
 plans live in `netrender-notes/`, indexed by

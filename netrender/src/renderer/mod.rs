@@ -48,8 +48,9 @@ use netrender_device::WgpuDevice;
 
 use crate::external_texture::{
     ExternalTextureComposite, ExternalTexturePipeline, ExternalTexturePlacement,
+    external_texture_commands,
 };
-use crate::render_graph::{ImageLoad, ImageUse, RenderGraph};
+use netrender_device::render_graph::{ImageLoad, ImageUse, RenderGraph};
 use crate::scene::{ImageKey, Scene};
 use crate::tile_cache::TileCache;
 
@@ -678,25 +679,24 @@ impl Renderer {
                 "opaque tenant composite",
                 vec![ImageUse::sampled_read(tenant_image)],
                 ImageUse::color_attachment(master_image, ImageLoad::Load),
-                Box::new(move |device, encoder, inputs, output| {
+                Box::new(move |device, inputs| {
                     assert_eq!(inputs.len(), 1);
-                    assert!(crate::external_texture::encode_external_texture(
+                    external_texture_commands(
                         device,
                         &pipe,
                         &inputs[0],
-                        output,
                         size.width,
                         size.height,
                         placement,
-                        encoder,
-                    ));
+                    )
+                    .expect("nonempty opaque tenant placement")
                 }),
             )
             .expect("opaque tenant graph task admission");
         let plan = graph
             .compile(&[master_image])
             .expect("opaque tenant graph compilation")
-            .with_raster_execution(crate::renderer::RasterExecution::classic());
+            .with_diagnostic_header(crate::renderer::RasterExecution::classic().dump());
         let graph_dump = plan.dump();
         let mut imported = HashMap::new();
         imported.insert(tenant_image, tenant.texture.clone());

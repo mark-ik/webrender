@@ -30,11 +30,11 @@ impl Renderer {
         blur_radius_px: f32,
         invert: bool,
     ) -> (
-        crate::render_graph::ExecutionPlan,
-        crate::render_graph::ImageNode,
+        netrender_device::render_graph::ExecutionPlan,
+        netrender_device::render_graph::ImageNode,
     ) {
         use crate::filter::{blur_pass_callback, clip_rectangle_callback, make_bilinear_sampler};
-        use crate::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
+        use netrender_device::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
 
         let device = self.wgpu_device.core.device.clone();
         let mask_format = wgpu::TextureFormat::Rgba8Unorm;
@@ -161,9 +161,12 @@ impl Renderer {
 
     pub(crate) fn execute_box_shadow_plan(
         &self,
-        plan: crate::render_graph::ExecutionPlan,
-        output: crate::render_graph::ImageNode,
-    ) -> (wgpu::Texture, crate::render_graph::ExecutionReport) {
+        plan: netrender_device::render_graph::ExecutionPlan,
+        output: netrender_device::render_graph::ImageNode,
+    ) -> (
+        wgpu::Texture,
+        netrender_device::render_graph::ExecutionReport,
+    ) {
         let device = self.wgpu_device.core.device.clone();
         let queue = self.wgpu_device.core.queue.clone();
         let (mut outputs, report) = plan

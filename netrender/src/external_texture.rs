@@ -314,13 +314,52 @@ pub(crate) fn encode_external_texture(
     placement: ExternalTexturePlacement,
     encoder: &mut wgpu::CommandEncoder,
 ) -> bool {
+    let Some(commands) = external_texture_commands(
+        device,
+        pipe,
+        source_view,
+        viewport_width,
+        viewport_height,
+        placement,
+    ) else {
+        return false;
+    };
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("netrender external texture pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target_view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    commands.encode(&mut pass);
+    true
+}
+
+/// Prepare the commands for one executor-owned external-texture pass.
+pub(crate) fn external_texture_commands(
+    device: &wgpu::Device,
+    pipe: &ExternalTexturePipeline,
+    source_view: &wgpu::TextureView,
+    viewport_width: u32,
+    viewport_height: u32,
+    placement: ExternalTexturePlacement,
+) -> Option<Box<dyn netrender_device::render_graph::ImageRenderCommands>> {
     if viewport_width == 0
         || viewport_height == 0
         || placement.opacity <= 0.0
         || placement.dest_rect[0] == placement.dest_rect[2]
         || placement.dest_rect[1] == placement.dest_rect[3]
     {
-        return false;
+        return None;
     }
 
     let bytes = params_bytes(viewport_width, viewport_height, placement);
@@ -355,32 +394,17 @@ pub(crate) fn encode_external_texture(
         ],
     });
 
-    {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("netrender external texture pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target_view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        let pipeline = match placement.alpha {
-            SourceAlpha::Straight => &pipe.straight,
-            SourceAlpha::Premultiplied => &pipe.premultiplied,
-        };
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..6, 0..1);
-    }
-    true
+    let pipeline = match placement.alpha {
+        SourceAlpha::Straight => pipe.straight.clone(),
+        SourceAlpha::Premultiplied => pipe.premultiplied.clone(),
+    };
+    Some(netrender_device::render_graph::image_render_commands(
+        move |pass| {
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..6, 0..1);
+        },
+    ))
 }
 
 pub(crate) fn compose_external_texture(

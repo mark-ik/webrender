@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use crate::filter::{blur_pass_callback, color_matrix_callback, make_bilinear_sampler};
-use crate::render_graph::{
-    EncodeCallback, ExecutionPlan, ImageLoad, ImageNode, ImageUse, RenderGraph, TransientImageDesc,
+use netrender_device::render_graph::{
+    ExecutionPlan, ImageLoad, ImageNode, ImageUse, PrepareCallback, RenderGraph,
+    TransientImageDesc, image_render_commands,
 };
 use crate::scene::{Scene, SceneBlendMode, SceneClip, SceneCompose, SceneFilter, SceneOp};
 
@@ -291,7 +292,7 @@ fn two_image_callback(
     dest: [f32; 4],
     uv: [f32; 4],
     opacity: f32,
-) -> EncodeCallback {
+) -> PrepareCallback {
     let values = [
         dest[0],
         dest[1],
@@ -310,7 +311,7 @@ fn two_image_callback(
     for (index, value) in values.iter().enumerate() {
         bytes[index * 4..(index + 1) * 4].copy_from_slice(&value.to_ne_bytes());
     }
-    Box::new(move |device, encoder, inputs, output| {
+    Box::new(move |device, inputs| {
         assert_eq!(inputs.len(), 2, "RG2c join requires two image inputs");
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("netrender RG2c two-image params"),
@@ -346,25 +347,11 @@ fn two_image_callback(
                 },
             ],
         });
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("netrender RG2c two-image pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: output,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_pipeline(&pipe.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..6, 0..1);
+        image_render_commands(move |pass| {
+            pass.set_pipeline(&pipe.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..6, 0..1);
+        })
     })
 }
 
@@ -583,7 +570,7 @@ impl Renderer {
         let plan = graph
             .compile(&[output])
             .expect("RG2c combined-effect graph compilation")
-            .with_raster_execution(execution);
+            .with_diagnostic_header(execution.dump());
         CombinedEffectPlan {
             plan,
             prefix_input,

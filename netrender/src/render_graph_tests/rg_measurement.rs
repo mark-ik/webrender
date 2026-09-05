@@ -16,7 +16,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::render_graph::ExecutionReport;
+use netrender_device::render_graph::ExecutionReport;
 use crate::{NetrenderOptions, Renderer, boot};
 
 const WARMUPS: usize = 16;

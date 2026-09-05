@@ -19,7 +19,7 @@ mod rg_measurement;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crate::filter::{blur_pass_callback, clip_rectangle_callback, make_bilinear_sampler};
-use crate::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
+use netrender_device::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
 use crate::Renderer;
 
 const MASK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;

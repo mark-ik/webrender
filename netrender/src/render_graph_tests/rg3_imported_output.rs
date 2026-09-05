@@ -9,9 +9,9 @@
 use std::collections::HashMap;
 
 use crate::external_texture::{
-    ExternalTexturePlacement, build_external_texture_pipeline, encode_external_texture,
+    ExternalTexturePlacement, build_external_texture_pipeline, external_texture_commands,
 };
-use crate::render_graph::{ImageLoad, ImageUse, RenderGraph};
+use netrender_device::render_graph::{ImageLoad, ImageUse, RenderGraph};
 use crate::{NetrenderOptions, boot, create_netrender_instance};
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -124,11 +124,10 @@ fn rg3_imported_output_load_preserves_untouched_pixels() {
             "rg3 sampled import composite",
             vec![ImageUse::sampled_read(source_node)],
             ImageUse::color_attachment(target_node, ImageLoad::Load),
-            Box::new(move |device, encoder, inputs, output| {
+            Box::new(move |device, inputs| {
                 assert_eq!(inputs.len(), 1);
-                assert!(encode_external_texture(
-                    device, &pipe, &inputs[0], output, WIDTH, HEIGHT, placement, encoder,
-                ));
+                external_texture_commands(device, &pipe, &inputs[0], WIDTH, HEIGHT, placement)
+                    .expect("nonempty RG3 placement")
             }),
         )
         .unwrap();

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use netrender_device::{BrushBlurPipeline, ClipRectanglePipeline, ColorMatrixPipeline};
 
-use crate::render_graph::EncodeCallback;
+use netrender_device::render_graph::{PrepareCallback, image_render_commands};
 
 /// Bilinear-clamp sampler. `brush_blur` and other filter passes use
 /// this to sample their input textures.
@@ -44,7 +44,7 @@ pub(crate) fn clip_rectangle_callback(
     pipe: ClipRectanglePipeline,
     bounds: [f32; 4],
     corner_radius: f32,
-) -> EncodeCallback {
+) -> PrepareCallback {
     // ClipParams: bounds (vec4) + radii (vec4) = 32 bytes.
     let mut bytes = [0u8; 32];
     for (i, f) in bounds.iter().enumerate() {
@@ -54,7 +54,7 @@ pub(crate) fn clip_rectangle_callback(
         bytes[i * 4..(i + 1) * 4].copy_from_slice(&corner_radius.to_ne_bytes());
     }
 
-    Box::new(move |device, encoder, _inputs, output| {
+    Box::new(move |device, _inputs| {
         let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("clip_rectangle params"),
             size: 32,
@@ -79,25 +79,11 @@ pub(crate) fn clip_rectangle_callback(
             }],
         });
 
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("clip_rectangle pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: output,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_pipeline(&pipe.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..4, 0..1);
+        image_render_commands(move |pass| {
+            pass.set_pipeline(&pipe.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..4, 0..1);
+        })
     })
 }
 
@@ -110,12 +96,12 @@ pub(crate) fn blur_pass_callback(
     sampler: Arc<wgpu::Sampler>,
     step_x: f32,
     step_y: f32,
-) -> EncodeCallback {
+) -> PrepareCallback {
     let mut step_bytes = [0u8; 16];
     step_bytes[0..4].copy_from_slice(&step_x.to_ne_bytes());
     step_bytes[4..8].copy_from_slice(&step_y.to_ne_bytes());
 
-    Box::new(move |device, encoder, inputs, output| {
+    Box::new(move |device, inputs| {
         assert!(!inputs.is_empty(), "blur task: expected one input view");
         let input_view = &inputs[0];
 
@@ -153,25 +139,11 @@ pub(crate) fn blur_pass_callback(
             ],
         });
 
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("blur pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: output,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_pipeline(&pipe.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..4, 0..1);
+        image_render_commands(move |pass| {
+            pass.set_pipeline(&pipe.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..4, 0..1);
+        })
     })
 }
 
@@ -185,7 +157,7 @@ pub(crate) fn color_matrix_callback(
     pipe: ColorMatrixPipeline,
     sampler: Arc<wgpu::Sampler>,
     matrix: [f32; 20],
-) -> EncodeCallback {
+) -> PrepareCallback {
     // 4 rows of vec4 (the r,g,b,a coefficients) + a bias vec4 (column 4).
     let mut bytes = [0u8; 80];
     for row in 0..4 {
@@ -197,7 +169,7 @@ pub(crate) fn color_matrix_callback(
         bytes[bias_off..bias_off + 4].copy_from_slice(&matrix[row * 5 + 4].to_ne_bytes());
     }
 
-    Box::new(move |device, encoder, inputs, output| {
+    Box::new(move |device, inputs| {
         assert!(
             !inputs.is_empty(),
             "color_matrix task: expected one input view"
@@ -238,24 +210,10 @@ pub(crate) fn color_matrix_callback(
             ],
         });
 
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("color_matrix pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: output,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_pipeline(&pipe.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..4, 0..1);
+        image_render_commands(move |pass| {
+            pass.set_pipeline(&pipe.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..4, 0..1);
+        })
     })
 }

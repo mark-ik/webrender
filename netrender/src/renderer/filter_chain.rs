@@ -30,7 +30,9 @@ impl Renderer {
         blur_radius_px: f32,
     ) -> wgpu::Texture {
         use crate::filter::{blur_pass_callback, make_bilinear_sampler};
-        use crate::render_graph::{ImageAccess, ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
+        use netrender_device::render_graph::{
+            ImageAccess, ImageLoad, ImageUse, RenderGraph, TransientImageDesc,
+        };
         use std::collections::HashMap;
 
         let device = self.wgpu_device.core.device.clone();
@@ -165,7 +167,7 @@ impl Renderer {
         matrix: [f32; 20],
     ) -> wgpu::Texture {
         use crate::filter::{color_matrix_callback, make_bilinear_sampler};
-        use crate::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
+        use netrender_device::render_graph::{ImageLoad, ImageUse, RenderGraph, TransientImageDesc};
         use std::collections::HashMap;
 
         let device = self.wgpu_device.core.device.clone();

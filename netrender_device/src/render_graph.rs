@@ -23,16 +23,39 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
-/// Signature for a task's encode callback.
+/// Commands recorded inside one executor-owned render pass.
 ///
-/// Receives the wgpu device (for bind group creation), the active encoder,
-/// and input texture views in the task's declared order, followed by the
-/// pre-created output view. The callback must encode and close exactly one
-/// render pass targeting `output` before it returns.
-pub(crate) type EncodeCallback = Box<
-    dyn FnOnce(&wgpu::Device, &mut wgpu::CommandEncoder, &[wgpu::TextureView], &wgpu::TextureView)
-        + Send,
->;
+/// The executor, rather than the caller, opens and closes the pass against the
+/// task's declared output. This is the cross-crate seam that keeps raw command
+/// encoders out of the render-task API.
+pub trait ImageRenderCommands: Send {
+    fn encode<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>);
+}
+
+struct ImageRenderCommandClosure<F>(F);
+
+impl<F> ImageRenderCommands for ImageRenderCommandClosure<F>
+where
+    F: for<'pass> Fn(&mut wgpu::RenderPass<'pass>) + Send,
+{
+    fn encode<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>) {
+        (self.0)(pass);
+    }
+}
+
+/// Package render-pass commands without exposing the executor's encoder.
+pub fn image_render_commands<F>(commands: F) -> Box<dyn ImageRenderCommands>
+where
+    F: for<'pass> Fn(&mut wgpu::RenderPass<'pass>) + Send + 'static,
+{
+    Box::new(ImageRenderCommandClosure(commands))
+}
+
+/// Prepare one task after its declared input views have been resolved.
+/// Resource creation belongs here; pass commands belong in the returned
+/// [`ImageRenderCommands`].
+pub type PrepareCallback =
+    Box<dyn FnOnce(&wgpu::Device, &[wgpu::TextureView]) -> Box<dyn ImageRenderCommands> + Send>;
 
 /// Process-local identity for one logical graph instance.
 ///
@@ -454,13 +477,11 @@ fn build_report(
     }
 }
 
-type PlannedEncodeCallback = EncodeCallback;
-
 struct PlannedTask {
     label: String,
     inputs: Vec<ImageUse>,
     output: ImageUse,
-    encode: PlannedEncodeCallback,
+    prepare: PrepareCallback,
 }
 
 struct CompiledTask {
@@ -469,7 +490,7 @@ struct CompiledTask {
     label: String,
     inputs: Vec<ImageUse>,
     output: ImageUse,
-    encode: PlannedEncodeCallback,
+    prepare: PrepareCallback,
 }
 
 /// A validated, cullable image execution plan. It owns opaque encode
@@ -481,7 +502,7 @@ pub struct ExecutionPlan {
     requested_outputs: Vec<ImageNode>,
     lifetimes: Vec<ResourceLifetime>,
     compile_duration: Duration,
-    raster_execution: Option<crate::renderer::RasterExecution>,
+    diagnostic_header: Option<String>,
 }
 
 impl ExecutionPlan {
@@ -489,8 +510,8 @@ impl ExecutionPlan {
     #[allow(dead_code)]
     pub fn dump(&self) -> String {
         let mut out = String::from("ExecutionPlan\n");
-        if let Some(execution) = self.raster_execution {
-            out.push_str(&execution.dump());
+        if let Some(header) = &self.diagnostic_header {
+            out.push_str(header);
             out.push('\n');
         } else {
             out.push_str("rasterizer=unspecified execution_boundary=unspecified\n");
@@ -574,14 +595,11 @@ impl ExecutionPlan {
         out
     }
 
-    /// Attach the renderer-owned raster participation label to this plan.
-    /// The label is diagnostic only; it does not alter graph scheduling.
+    /// Attach a producer-owned diagnostic header to this plan.
+    /// The text is diagnostic only; it does not alter graph scheduling.
     #[allow(dead_code)]
-    pub(crate) fn with_raster_execution(
-        mut self,
-        execution: crate::renderer::RasterExecution,
-    ) -> Self {
-        self.raster_execution = Some(execution);
+    pub fn with_diagnostic_header(mut self, header: impl Into<String>) -> Self {
+        self.diagnostic_header = Some(header.into());
         self
     }
 
@@ -607,7 +625,7 @@ impl ExecutionPlan {
     /// bindings own the texture values passed here; transient outputs are
     /// owned by the returned map. This is the seam for a rasterizer prelude
     /// that must share the graph executor's submission.
-    pub(crate) fn encode_into(
+    pub fn encode_into(
         self,
         device: &wgpu::Device,
         mut imported: HashMap<ImageNode, wgpu::Texture>,
@@ -738,10 +756,35 @@ impl ExecutionPlan {
                 })
                 .collect();
 
-            // Planned callbacks are internal until a scoped facade can enforce
-            // this contract at the type boundary. Existing filter callbacks
-            // begin and drop exactly one pass inside this call.
-            (task.encode)(device, &mut *encoder, &input_views, &output_view);
+            let commands = (task.prepare)(device, &input_views);
+            let ImageAccess::ColorAttachment { load, store } = task.output.access else {
+                unreachable!("validated task output is a color attachment")
+            };
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(&task.label),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &output_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: match load {
+                            ImageLoad::Clear => wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            ImageLoad::Load => wgpu::LoadOp::Load,
+                        },
+                        store: if store {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            commands.encode(&mut pass);
+            drop(pass);
             if matches!(
                 find_decl(&self.images, image),
                 Some(ImageDecl::Transient(_))
@@ -785,7 +828,7 @@ impl ExecutionPlan {
 
     /// Execute one image-only encoder batch. Imported bindings own the texture
     /// values passed here; transient outputs are owned by the returned map.
-    pub(crate) fn execute(
+    pub fn execute(
         self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -821,7 +864,7 @@ impl RenderGraph {
 
     /// Register a caller-owned image. The physical texture is supplied to
     /// [`ExecutionPlan::execute`] under the returned logical node.
-    pub(crate) fn import_image(
+    pub fn import_image(
         &mut self,
         label: impl Into<String>,
         size: wgpu::Extent3d,
@@ -840,7 +883,7 @@ impl RenderGraph {
     }
 
     /// Register an executor-owned transient image.
-    pub(crate) fn transient_image(&mut self, desc: TransientImageDesc) -> ImageNode {
+    pub fn transient_image(&mut self, desc: TransientImageDesc) -> ImageNode {
         let node = ImageNode {
             graph: self.graph,
             index: self.images.len() as u32,
@@ -849,21 +892,21 @@ impl RenderGraph {
         node
     }
 
-    /// Add one image-only task to the new build/compile path. The callback is
-    /// trusted internal machinery and must close every render pass before it
-    /// returns; it is intentionally not a new tenant-facing API.
-    pub(crate) fn add_plan_task(
+    /// Add one image-only task to the build/compile path. The callback prepares
+    /// resources, then returns commands for the executor-owned output pass.
+    /// It cannot access the raw command encoder or choose another target.
+    pub fn add_plan_task(
         &mut self,
         label: impl Into<String>,
         inputs: Vec<ImageUse>,
         output: ImageUse,
-        encode: EncodeCallback,
+        prepare: PrepareCallback,
     ) -> Result<(), GraphBuildError> {
         let task = PlannedTask {
             label: label.into(),
             inputs,
             output,
-            encode,
+            prepare,
         };
         for use_ in task.inputs.iter().chain(std::iter::once(&task.output)) {
             self.check_node(use_.image)?;
@@ -956,7 +999,7 @@ impl RenderGraph {
 
     /// Consume the logical graph and produce an inspectable, cullable plan.
     /// Allocation and encoding happen only when the returned plan executes.
-    pub(crate) fn compile(
+    pub fn compile(
         self,
         requested_outputs: &[ImageNode],
     ) -> Result<ExecutionPlan, GraphBuildError> {
@@ -1089,7 +1132,7 @@ impl RenderGraph {
                     label: task.label,
                     inputs: task.inputs,
                     output: task.output,
-                    encode: task.encode,
+                    prepare: task.prepare,
                 }
             })
             .collect::<Vec<_>>();
@@ -1149,7 +1192,7 @@ impl RenderGraph {
             requested_outputs: requested_outputs.to_vec(),
             lifetimes,
             compile_duration,
-            raster_execution: None,
+            diagnostic_header: None,
         })
     }
 }
@@ -1167,8 +1210,8 @@ mod tests {
         }
     }
 
-    fn noop_callback() -> EncodeCallback {
-        Box::new(|_, _, _, _| {})
+    fn noop_callback() -> PrepareCallback {
+        Box::new(|_, _| image_render_commands(|_| {}))
     }
 
     #[test]
