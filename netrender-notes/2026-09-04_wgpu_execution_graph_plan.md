@@ -2,10 +2,9 @@
 
 **Date:** 2026-09-04
 
-**Status:** RG0 through the RG2b execution-boundary slice and RG3's Paredros
-first-consumer plus headed validation/presentation receipts delivered;
-Paredros rebuild-all delivered; Mesocosm remains; RG2c remains the
-graph-promotion gate; RG5 deferred
+**Status:** RG0 through RG2c and RG3's Paredros first-consumer plus headed
+validation/presentation receipts delivered; Paredros rebuild-all delivered;
+Mesocosm remains; the graph-promotion gate has passed; RG5 deferred
 
 **Prior art:**
 
@@ -362,11 +361,9 @@ layer content Vello -> element filters -> image ----+
 That capability is currently exercised only through direct `Scene` tests;
 `PaintList::LayerSpec` cannot yet express a backdrop filter. Classic Vello's
 internal submission also means an encoder-only RG1 cannot execute the whole
-shape honestly. RG2b now proves the three explicit producer boundaries, but
-its shared downstream graph remains unary. RG2c owns the first honest compiled
-and executed receipt for this multi-input effect shape. Until that lands,
-describe production graph use as unary rather than presenting a synthetic
-fork/join as consumer proof. The live seams are
+shape honestly. RG2b proves the three explicit producer boundaries, while its
+shared downstream graph remains unary. RG2c now supplies the first honest
+compiled and executed receipt for this multi-input effect shape. The live seams are
 [`filter_passes.rs`](../netrender/src/renderer/filter_passes.rs),
 [`filter_chain.rs`](../netrender/src/renderer/filter_chain.rs), and
 [`filters.rs`](../netrender/src/renderer/filters.rs).
@@ -445,7 +442,7 @@ RG1 establishes a useful compiled linear plan and the machinery needed to
 describe a DAG. It does not by itself earn crate extraction, prepared shapes,
 pass merging, or claims of a general renderer graph. RG2b adds honest producer
 boundaries while retaining a unary shared graph. RG2c's real combined-effect
-fork/join is the promotion gate.
+fork/join passes the promotion gate without yet justifying crate extraction.
 
 ### RG2a: Prove semantic adapter conformance
 
@@ -575,6 +572,28 @@ this passes, graph preparation, extraction, and general-graph promotion claims
 remain closed. RG3 may proceed independently while it keeps each tenant's
 internal topology opaque.
 
+Delivered in `e279efd9d`. The first admitted decomposition is deliberately
+bounded to one square-viewport, outermost, trailing, normal SrcOver layer with
+an identity transform and either a sharp rectangular clip or full-viewport
+clip. It preserves the prefix, layer bounds, alpha, content, painter order,
+backdrop blur, and element filter chain. Nested, multiple, transformed,
+rounded/path-clipped, nontrailing, nonstandard-composition, and unsupported
+backdrop-filter shapes return typed decomposition errors. Raw Hybrid and CPU
+admission still refuses the original filter-bearing `Scene`; only the two
+renderer-produced filter-free fragments cross those raster boundaries.
+
+The opt-in physical receipt at
+`C:/Users/mark_/Code/testing/netrender/rg2c_backend_neutral_effect.json` records
+the same real 11-step fork/join for Classic/opaque submission, Hybrid/encoder
+batch, and CPU/ready upload import. Each plan has distinct prefix and content
+imports, eight backdrop-blur passes, one element matrix, a two-input layer
+join, and a final prefix/layer-alpha composite. All three preserve the outside
+prefix pixel as `[0, 0, 255, 255]`. Removing backdrop blur changes the checked
+boundary anchor by 121 channel-points; removing the element filter changes the
+center anchor by 202 for Classic and 162 for Hybrid/CPU. This passes the
+multi-input promotion gate. Extraction still waits for RG3's second consumer,
+and prepared/reused graph shapes remain RG4 work.
+
 ### RG3: Join one tenant frame
 
 Start with Paredros because it already proves shared-device tenancy. Mesocosm
@@ -641,19 +660,20 @@ device-loss callbacks enter the same `RebuildAll` disposition.
 Netrender's internal empty-surface compositor bookkeeping also is not
 transactionally rolled back when the outer host suppresses native presentation.
 
-Mesocosm's second-consumer edit is paused at an explicit collision boundary.
-Its 2026-09-05 live checkout has 73 dirty paths and is two local commits ahead
-of `origin/main`; 14 dirty paths are inside `mesocosm-genet`, including its app,
-section, played-body, and new inspection work. In that current path, `Section`
+Mesocosm's collision boundary cleared on 2026-09-05. Its body generation,
+vertical camera cut-wall, and keyboard inspection work are committed through
+`c507ff7`, and its production `mesocosm-genet` render paths are available for a
+focused RG3 edit. Fifty-two remaining dirty paths are recorded as pre-existing
+trailing-comma formatting in
+`C:/Users/mark_/Code/testing/mesocosm/vb3_inspection/remaining_paths.json` and
+must remain outside the integration commit. In the current path, `Section`
 owns the traced/display textures, copies into its sRGB display texture, and
 composites it directly to the acquired surface. `Chrome` renders HUD rasters
 through Netrender but also blends them into that caller-owned surface encoder;
-there is not yet a production Netrender master/tenant boundary. The eventual
-slice is therefore to expose the initialized section display texture, move
-final composition to the Netrender master, place the section as the opaque
-tenant, paint the HUD/chrome over it, then let the host blit the master to the
-surface. A clean `origin/main` worktree would miss the load-bearing current app
-and section WIP, so it is not accepted as evidence for the current app.
+there is not yet a production Netrender master/tenant boundary. The next slice
+is therefore to expose the initialized section display texture, move final
+composition to the Netrender master, place the section as the opaque tenant,
+paint the HUD/chrome over it, then let the host blit the master to the surface.
 
 RG3 first treats each tenant's internal buffer copies, 3D textures, resident
 compute, and depth composition as one closed tenant operation. It does not
@@ -809,15 +829,14 @@ without raw-hal access.
 
 ## Next implementation slice
 
-Complete RG3's second consumer when Mesocosm's active render WIP can accept a
-coherent edit: expose its initialized Section display texture, place that
-opaque producer between Netrender master layers, paint HUD/chrome over it, and
-let the host blit the master to the surface. Preserve the tenant's internal
-resource topology as one closed operation and report an explicit unknown when
-its physical producer submission count is not measured. There is no remaining
-collision-free RG3 implementation slice while that checkout is active;
-extraction still waits for both consumers. RG2c is the separate general-graph
-promotion gate.
+Complete RG3's second consumer in Mesocosm: expose its initialized Section
+display texture, place that opaque producer between Netrender master layers,
+paint HUD/chrome over it, and let the host blit the master to the surface.
+Preserve the tenant's internal resource topology as one closed operation and
+report an explicit unknown when its physical producer submission count is not
+measured. Keep the 52 formatting-only paths out of the focused commit.
+Extraction still waits for this second consumer; RG2c has separately passed
+the multi-input graph-promotion gate.
 
 ## Acceptance summary
 
