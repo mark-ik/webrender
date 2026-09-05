@@ -223,7 +223,12 @@ Captures elide font payloads, which is why they are 2 KB rather than
   awaited and optimistic suppression in pure reducer tests, capture a real
   scoped wgpu validation failure, and submit valid work afterward. A headed
   failure through the real headed room surface and the shared-device rebuild
-  lifecycle are delivered in `3ddf1d3` and `bc452ca`. Mesocosm commits
+  lifecycle are delivered in `3ddf1d3` and `bc452ca`. Renderling commit
+  `3683dd6` adds complete-stage caller-owned encoding for direct draws, and
+  Paredros commit `9a647c9` adopts it. The strengthened RG3 receipt measures
+  the 20-pass Renderling tenant as one caller submission with zero internal
+  submissions, followed by one separate Netrender graph submission, while
+  retaining the 466-colour byte-match. Mesocosm commits
   `bccdbac` and `6d598e3` supply the second consumer: its production Section is
   one closed opaque tenant, the receipt reports one caller submission plus one
   graph batch and submission, and graph-backed replay preserves the recorded

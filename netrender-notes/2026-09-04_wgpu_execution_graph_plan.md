@@ -620,12 +620,18 @@ receipt.
 
 Paredros adopted the envelope in `1491c2b`. Its opt-in fixed-room receipt uses
 one `WgpuHandles`, two fresh composers for the candidate/baseline comparison,
-the real Renderling room target, and the final Netrender master. The final
-master bytes match exactly and contain 466 distinct colors. The dump names
-`paredros-room`, `renderling::Stage::render (opaque)`, fallback count zero, one
-logical opaque producer boundary, one graph encoder/submission, and an unknown
-caller-reported physical producer count. The normal Renderling room path now
-uses the envelope; the DDA/R1 path retains its earlier legacy composition.
+the real Renderling room target, and the final Netrender master. Renderling
+commit `3683dd6` and Paredros commit `9a647c9` strengthen that receipt:
+`Stage::encode_into` records the direct-draw geometry/depth pass, bloom chain,
+tonemapping, and optional debug pass into a caller-owned encoder, and Paredros
+submits that encoder exactly once before the graph composite. The dump now
+names `paredros-room`, `renderling::Stage::encode_into (opaque)`, fallback
+count zero, one logical opaque producer boundary, one measured physical tenant
+submission, and one separate graph encoder/submission. It also reports the
+tenant's 20 render passes, zero copy commands, and zero internal submissions.
+The final master remains an exact 466-colour byte-match against the legacy
+composition path. The normal Renderling room path uses the envelope; the
+DDA/R1 path retains its earlier legacy composition.
 
 Paredros added the host-owned validation and presentation gate in `81a2f08`,
 made optimistic resolution nonblocking in `0bfd2f7`, and closed the headed
