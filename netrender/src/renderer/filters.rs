@@ -8,11 +8,40 @@
 //! planner, backdrop/element-filter scene rewriting helpers, and the CSS
 //! color-matrix table. See [`super`].
 
-use crate::scene::{ImageKey, Scene};
+use crate::scene::{ImageKey, Scene, SceneOp};
 
+/// Build the ordinary-scene suffix that paints after an external texture.
+///
+/// Scene operation boundaries can fall inside CSS opacity or overflow-clip
+/// layers. A raw suffix would then begin with later content (or a `PopLayer`)
+/// without the open ancestors that give those operations their meaning. Replay
+/// those still-open `PushLayer`s, in outer-to-inner order, before the suffix.
+/// The suffix's original matching pops close them, so the fragment is balanced
+/// without repainting any prefix content. This only balances the tail redraw;
+/// it does not make the external producer itself inherit ancestor clips,
+/// transforms, or opacity.
 pub(super) fn scene_tail_fragment(scene: &Scene, scene_op_boundary: usize) -> Scene {
+    let boundary = scene_op_boundary.min(scene.ops.len());
+    let mut open_layers = Vec::new();
+    for op in &scene.ops[..boundary] {
+        match op {
+            SceneOp::PushLayer(layer) => open_layers.push(layer.clone()),
+            SceneOp::PopLayer => {
+                let popped = open_layers.pop();
+                debug_assert!(
+                    popped.is_some(),
+                    "scene tail boundary has an unbalanced PopLayer in its prefix"
+                );
+            }
+            _ => {}
+        }
+    }
     let mut fragment = scene.clone();
-    fragment.ops = scene.ops[scene_op_boundary.min(scene.ops.len())..].to_vec();
+    fragment.ops = open_layers
+        .into_iter()
+        .map(SceneOp::PushLayer)
+        .chain(scene.ops[boundary..].iter().cloned())
+        .collect();
     fragment.compositor_surfaces.clear();
     fragment
 }
@@ -386,6 +415,51 @@ pub(crate) fn blur_kernel_plan_with_downscale(blur_radius_px: f32) -> (u32, usiz
     let scaled_radius = blur_radius_px / level as f32;
     let (passes, step_px) = blur_kernel_plan(scaled_radius);
     (level, passes, step_px)
+}
+
+#[cfg(test)]
+mod scene_tail_tests {
+    use super::scene_tail_fragment;
+    use crate::{Scene, SceneLayer, SceneOp};
+
+    #[test]
+    fn tail_reopens_nested_layers_without_replaying_prefix_content() {
+        let mut scene = Scene::new(64, 64);
+        scene.push_layer(SceneLayer::alpha(0.75));
+        scene.push_rect(0.0, 0.0, 8.0, 8.0, [1.0, 0.0, 0.0, 1.0]);
+        scene.push_layer(SceneLayer::alpha(0.5));
+        scene.push_rect(8.0, 8.0, 16.0, 16.0, [0.0, 1.0, 0.0, 1.0]);
+        let boundary = scene.ops.len();
+        scene.push_rect(16.0, 16.0, 24.0, 24.0, [0.0, 0.0, 1.0, 1.0]);
+        scene.pop_layer();
+        scene.pop_layer();
+
+        let tail = scene_tail_fragment(&scene, boundary);
+        assert_eq!(tail.ops.len(), 5);
+        assert!(matches!(tail.ops[0], SceneOp::PushLayer(ref layer) if layer.alpha == 0.75));
+        assert!(matches!(tail.ops[1], SceneOp::PushLayer(ref layer) if layer.alpha == 0.5));
+        assert!(
+            matches!(tail.ops[2], SceneOp::Rect(ref rect) if rect.color == [0.0, 0.0, 1.0, 1.0])
+        );
+        assert!(matches!(tail.ops[3], SceneOp::PopLayer));
+        assert!(matches!(tail.ops[4], SceneOp::PopLayer));
+    }
+
+    #[test]
+    fn tail_after_closed_layers_does_not_reopen_or_duplicate_them() {
+        let mut scene = Scene::new(64, 64);
+        scene.push_layer(SceneLayer::alpha(0.5));
+        scene.push_rect(0.0, 0.0, 8.0, 8.0, [1.0, 0.0, 0.0, 1.0]);
+        scene.pop_layer();
+        let boundary = scene.ops.len();
+        scene.push_rect(8.0, 8.0, 16.0, 16.0, [0.0, 1.0, 0.0, 1.0]);
+
+        let tail = scene_tail_fragment(&scene, boundary);
+        assert_eq!(tail.ops.len(), 1);
+        assert!(
+            matches!(tail.ops[0], SceneOp::Rect(ref rect) if rect.color == [0.0, 1.0, 0.0, 1.0])
+        );
+    }
 }
 
 #[cfg(test)]
