@@ -1915,6 +1915,33 @@ wgpu 30; Classic `netrender-vello` 0.10.0; Hybrid and CPU `vello` 0.2.0 at
 - all-Vello and default `cargo check`, `cargo fmt --all -- --check`, and
   `git diff --check` — passed.
 
+## External canvas scene composition — CLEARED (2026-09-11)
+
+Host textures can now be GPU-staged as normal scene images. The paint-list
+translator preserves their command position, active transform, and enclosing
+clip/opacity layers. Staging accepts a sampled source without `COPY_SRC` and
+converts premultiplied pixels to the straight-alpha RGBA8 input required by
+Vello's image atlas. Two cached alpha pipelines avoid per-frame shader creation.
+Unchanged source generations skip staging; changed generations refresh the
+atlas, and new identities or removal invalidate tile and retained-fragment
+lowerings. Producer keys occupy a checked lower-62-bit namespace.
+
+With Rust 1.97.1, the focused GPU library test
+`external_image_stages_premultiplied_pixels_inside_scene_layers_at_fractional_dpr`
+passed on an actual required adapter. It checks analytic RGBA and adjacent clip
+edge pixels at scales 1, 1.5 and 2, unresolved-to-live registration, same-size
+refresh, resize and removal. Both `external_image_key` tests and both
+`paint_list_render` external-texture tests passed. GPU logs are preserved at
+`Code/testing/genet/ortet-compositing-netrender/`.
+
+The opacity/source-over oracle follows
+[CSS Color 4](https://www.w3.org/TR/css-color-4/#transparency) and
+[Compositing and Blending 1](https://www.w3.org/TR/compositing-1/#simplealphacompositing).
+Native host acceptance belongs to Genet's Ortet plan. The legacy direct-overlay
+API retains its flat composition contract; callers must choose one composition
+path per producer. GPU staging and atlas copying are additional work, without
+CPU readback; this receipt makes no performance or full WebGL conformance claim.
+
 ## 11.99 Open items — moved (2026-05-05)
 
 The catalogue of deferred refinements that originally lived here

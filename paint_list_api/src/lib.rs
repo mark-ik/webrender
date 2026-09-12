@@ -31,11 +31,11 @@
 //! ## Lowering contract
 //!
 //! The renderer owns [`PaintCmd`] → `netrender::Scene` translation. The
-//! `DrawExternalTexture` lowering specifically is the per-frame
-//! compositor pass (`ExternalTextureComposite` with `scene_op_boundary`),
-//! **not** a vello `SceneOp::Image`. This sidesteps tile-cache
-//! invalidation for mutating textures (WebGL canvas, embedded
-//! iframes, paint worklet output, etc.) by construction.
+//! `DrawExternalTexture` lowers at its command position to a normal Scene
+//! image. The host stages the same-device source under a reserved image key
+//! before rasterization, which keeps CSS transforms, clips, and opacity layers
+//! around the producer. Mutating producers must advance their staged source
+//! generation so the renderer refreshes the image and invalidates its tiles.
 
 #![deny(unsafe_code)]
 
@@ -252,7 +252,8 @@ pub enum PaintCmd {
     DrawRepeatingImage(RepeatingImageItem),
     /// External wgpu texture (WebGL canvas, embedded iframe output,
     /// paint worklet output, native form control, scrying view, etc.).
-    /// Lowers to the per-frame compositor pass, not a Scene image.
+    /// Lowers to an in-order Scene image. The host supplies the same-device
+    /// source before rendering; the serializable command carries no GPU handle.
     DrawExternalTexture(ExternalTextureItem),
     /// Box-shadow primitive (CSS `box-shadow` shape).
     DrawShadow(ShadowItem),

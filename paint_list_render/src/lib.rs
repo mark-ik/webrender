@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use log::warn;
 use netrender::{
     ExternalTexturePlacement, Glyph as NrGlyph, ImageKey as NrImageKey, NO_CLIP, SHARP_CLIP, Scene,
-    SceneImage, SceneOp, ScenePathStroke, ScenePattern, SceneShape, Transform,
+    SceneImage, SceneOp, ScenePathStroke, ScenePattern, SceneShape, Transform, external_image_key,
 };
 use paint_list_api::{self as ple, FontResource, ImageKey, ImageResource, PaintCmd, PaintList};
 
@@ -53,17 +53,21 @@ use composite::{register_fonts, register_images};
 use convert::*;
 use emit::*;
 pub use composite::{composite_paint_layers, CompositeLayer};
-/// External-texture composite metadata produced by the translator and
-/// consumed by the painter's frame-render path. The translator can't
-/// reach the embedder's texture registry or the renderer, so it records
-/// placement + key here and the painter materializes the composite.
+/// External-texture source metadata produced by the translator.
+///
+/// The ordinary `SceneImage` is emitted at the command's original position,
+/// so transforms, clips, and layers are normal Scene state. The host uses this
+/// side channel only to stage the producer texture under `image_key` before
+/// rendering and to retire it with the document.
 #[derive(Clone, Debug)]
 pub struct ExternalTextureDraw {
+    /// Producer-owned stable key, retained for source lookup and lifecycle.
     pub texture_key: u64,
+    /// Renderer image namespace key used by the in-scene `SceneImage`.
+    pub image_key: NrImageKey,
     pub placement: ExternalTexturePlacement,
-    /// Number of ordinary NetRender ops emitted before this external
-    /// texture draw. The renderer uses this to restore painter order
-    /// without forcing the texture through Vello's atlas path.
+    /// Position before the image op, retained for legacy direct-compositor
+    /// consumers that accept flat placement semantics.
     pub scene_op_boundary: usize,
 }
 
@@ -104,10 +108,10 @@ pub struct TranslatedDisplayList {
 // PaintList → Scene entry points
 // =============================================================================
 
-/// Translate a [`PaintList`] into a [`netrender::Scene`]. External-
-/// texture composite metadata stays renderer-private (used by
-/// `Paint::render` to drive `render_with_compositor_and_external_textures`);
-/// the public entry point returns just the Scene for testability.
+/// Translate a [`PaintList`] into a [`netrender::Scene`]. External textures
+/// become normal in-order scene images; hosts needing their source lifecycle
+/// use [`translate_envelope_with_external_textures`] or
+/// [`translate_paint_cmd_stream`] for the associated staging metadata.
 pub fn translate_paint_list<L: PaintList>(list: &L) -> Scene {
     translate_paint_cmd_stream(
         list.viewport(),
@@ -176,9 +180,8 @@ pub fn translate_paint_cmds_to_fragment(
     netrender::scene::SceneFragment::from_scene(translated.scene)
 }
 
-/// Variant that also returns the external-texture composite list and
-/// box-shadow mask requests. Used by `Paint::render` to drive
-/// `render_with_compositor_and_external_textures`.
+/// Variant that also returns external-source staging metadata and box-shadow
+/// mask requests. The external image itself is already in the returned Scene.
 pub fn translate_envelope_with_external_textures(
     envelope: &paint_list_api::PaintEnvelope,
 ) -> TranslatedDisplayList {
@@ -437,12 +440,31 @@ pub fn translate_paint_cmd_stream(
             }
             PaintCmd::DrawExternalTexture(et) => {
                 let (x0, y0, x1, y1) = rect_corners(&et.placement.bounds);
+                let image_key = external_image_key(et.texture_key);
                 external_textures.push(ExternalTextureDraw {
                     texture_key: et.texture_key,
+                    image_key,
                     placement: ExternalTexturePlacement::new([x0, y0, x1, y1])
                         .with_opacity(et.opacity),
                     scene_op_boundary: scene.ops.len(),
                 });
+                scene.ops.push(SceneOp::Image(SceneImage {
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    // Element opacity belongs to the surrounding CSS layer.
+                    // `ExternalTextureItem::opacity` remains meaningful for
+                    // generic producers that carry source-local opacity.
+                    color: [et.opacity, et.opacity, et.opacity, et.opacity],
+                    key: image_key,
+                    transform_id: tid,
+                    clip_rect: NO_CLIP,
+                    clip_corner_radii: SHARP_CLIP,
+                    clamp_to_uv: false,
+                    nearest: false,
+                }));
             }
             PaintCmd::DrawShadow(s) => {
                 if matches!(s.clip_mode, ple::BoxShadowClipMode::Inset) {

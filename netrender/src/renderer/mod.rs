@@ -47,8 +47,8 @@ use netrender_device::compositor::{Compositor, PresentedFrame};
 use netrender_device::WgpuDevice;
 
 use crate::external_texture::{
-    ExternalTextureComposite, ExternalTexturePipeline, ExternalTexturePlacement,
-    external_texture_commands,
+    ExternalImageStagingPipeline, ExternalTextureComposite, ExternalTexturePipeline,
+    ExternalTexturePlacement, SourceAlpha, external_texture_commands, stage_external_image,
 };
 use netrender_device::render_graph::{ImageLoad, ImageUse, RenderGraph};
 use crate::scene::{ImageKey, Scene};
@@ -92,6 +92,17 @@ pub struct Renderer {
     /// texture overlays.
     pub(crate) external_texture_pipelines:
         Mutex<HashMap<wgpu::TextureFormat, ExternalTexturePipeline>>,
+    /// Host producer images staged for Vello's COPY_SRC, straight-alpha image
+    /// atlas import. Keys are host-derived and remain stable for one live
+    /// producer; entries are explicitly retired by `unregister_external_image`.
+    external_images: Mutex<HashMap<ImageKey, ExternalImageState>>,
+    external_image_staging_pipeline: Mutex<Option<ExternalImageStagingPipeline>>,
+}
+
+#[derive(Clone, Copy)]
+struct ExternalImageState {
+    size: [u32; 2],
+    generation: u64,
 }
 
 /// See [`Renderer::surface_tiles`]: the per-surface tile states plus a
@@ -213,6 +224,105 @@ impl Default for ColorLoad {
 }
 
 impl Renderer {
+    /// Stage a same-device producer for use as a normal [`SceneImage`].
+    ///
+    /// The source may omit `COPY_SRC`: staging samples it on the GPU, converts
+    /// premultiplied WebGL output to Vello's required straight alpha, and
+    /// registers the resulting `Rgba8Unorm + COPY_SRC` texture under `key`.
+    /// A repeated `(key, size, generation)` is a no-op; callers must advance
+    /// `generation` whenever producer content changes and must never reuse a
+    /// live key for another producer.
+    pub fn stage_external_image(
+        &self,
+        key: ImageKey,
+        source_view: &wgpu::TextureView,
+        source_size: [u32; 2],
+        alpha: SourceAlpha,
+        generation: u64,
+    ) {
+        let size = [source_size[0].max(1), source_size[1].max(1)];
+        let previous = self
+            .external_images
+            .lock()
+            .expect("external_images lock")
+            .get(&key)
+            .copied();
+        if previous.is_some_and(|state| state.size == size && state.generation == generation) {
+            return;
+        }
+        let mut staging_pipeline = self
+            .external_image_staging_pipeline
+            .lock()
+            .expect("external_image_staging_pipeline lock");
+        let pipeline = staging_pipeline.get_or_insert_with(|| {
+            ExternalImageStagingPipeline::new(&self.wgpu_device.core.device)
+        });
+        let staged = stage_external_image(
+            &self.wgpu_device.core.device,
+            &self.wgpu_device.core.queue,
+            pipeline,
+            source_view,
+            size,
+            alpha,
+        );
+        drop(staging_pipeline);
+        let rast_mutex = self.vello_rasterizer.as_ref().expect(
+            "Renderer::stage_external_image requires NetrenderOptions::enable_vello = true",
+        );
+        let mut rast = rast_mutex.lock().expect("vello_rasterizer lock");
+        let new_image_identity =
+            previous.is_none() || previous.is_some_and(|state| state.size != size);
+        if new_image_identity && previous.is_some() {
+            rast.unregister_texture(key);
+            rast.register_texture(key, staged);
+            rast.invalidate_image_override_caches();
+        } else if !rast.refresh_texture(key, staged.clone()) {
+            rast.register_texture(key, staged);
+            rast.invalidate_image_override_caches();
+        }
+        drop(rast);
+        if new_image_identity {
+            self.invalidate_external_image_tile_caches();
+        }
+        self.external_images
+            .lock()
+            .expect("external_images lock")
+            .insert(key, ExternalImageState { size, generation });
+    }
+
+    /// Retire a host producer image and its Vello atlas registration.
+    pub fn unregister_external_image(&self, key: ImageKey) -> bool {
+        let removed = self
+            .external_images
+            .lock()
+            .expect("external_images lock")
+            .remove(&key)
+            .is_some();
+        if removed {
+            if let Some(rast_mutex) = &self.vello_rasterizer {
+                let mut rast = rast_mutex.lock().expect("vello_rasterizer lock");
+                rast.unregister_texture(key);
+                rast.invalidate_image_override_caches();
+            }
+            self.invalidate_external_image_tile_caches();
+        }
+        removed
+    }
+
+    /// Clear cache state whose scene hashes do not include Vello override
+    /// identities. Called only after a replacement or removal, never for a
+    /// same-sized refresh which keeps the old identity valid.
+    fn invalidate_external_image_tile_caches(&self) {
+        if let Some(tc) = &self.tile_cache {
+            tc.lock().expect("tile_cache lock").clear();
+        }
+        self.surface_tiles
+            .lock()
+            .expect("surface_tiles lock")
+            .map
+            .clear();
+    }
+
     /// Borrow the tile cache mutex (used by tests for invalidation
     /// inspection). Returns `None` if `tile_cache_size` was `None`.
     pub fn tile_cache(&self) -> Option<&Mutex<TileCache>> {
@@ -1012,6 +1122,245 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{NetrenderOptions, Scene, SourceAlpha, boot, create_netrender_instance};
+
+    fn target(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("external image test target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        (texture, view)
+    }
+
+    fn producer(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        pixel: [u8; 4],
+    ) -> wgpu::Texture {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("external image test producer without COPY_SRC"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let bytes = pixel.repeat((width * height) as usize);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        texture
+    }
+
+    #[test]
+    fn external_image_stages_premultiplied_pixels_inside_scene_layers_at_fractional_dpr() {
+        let handles = boot().expect("wgpu adapter required for external image GPU receipt");
+        let renderer = create_netrender_instance(
+            handles.clone(),
+            NetrenderOptions {
+                tile_cache_size: Some(16),
+                enable_vello: true,
+                ..Default::default()
+            },
+        )
+        .expect("vello renderer");
+        let key = crate::external_image_key(17);
+        let source = producer(&handles.device, &handles.queue, 4, 4, [0, 128, 0, 128]);
+        let source_view = source.create_view(&Default::default());
+
+        let mut scene = Scene::new(16, 16);
+        scene.push_rect(0.0, 0.0, 16.0, 16.0, [1.0, 0.0, 0.0, 1.0]);
+        scene.push_layer_clip(crate::SceneClip::Rect {
+            rect: [4.0, 4.0, 12.0, 12.0],
+            radii: [0.0; 4],
+        });
+        scene.push_layer_alpha(0.5);
+        scene.push_image_full(
+            0.0,
+            0.0,
+            16.0,
+            16.0,
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0; 4],
+            key,
+            0,
+            crate::NO_CLIP,
+        );
+        scene.pop_layer();
+        scene.pop_layer();
+
+        // The same scene can be rendered before a producer is available. Its
+        // SceneImage key does not change when the host registers it later, so
+        // registration must invalidate the cache rather than trusting the old
+        // tile hash.
+        let (unresolved_output, unresolved_view) = target(&handles.device, 16, 16);
+        renderer.render_vello_scaled(
+            &scene,
+            &unresolved_view,
+            ColorLoad::Clear(wgpu::Color::TRANSPARENT),
+            1.0,
+        );
+        let unresolved = renderer
+            .wgpu_device
+            .read_rgba8_texture(&unresolved_output, 16, 16);
+        assert_eq!(
+            &unresolved[((8 * 16 + 8) * 4) as usize..((8 * 16 + 8) * 4 + 4) as usize],
+            &[255, 0, 0, 255],
+            "unregistered image must not paint before the producer is staged"
+        );
+        renderer.stage_external_image(key, &source_view, [4, 4], SourceAlpha::Premultiplied, 1);
+
+        for scale in [1.0_f32, 1.5, 2.0] {
+            let width = (16.0 * scale) as u32;
+            let (output, output_view) = target(&handles.device, width, width);
+            renderer.render_vello_scaled(
+                &scene,
+                &output_view,
+                ColorLoad::Clear(wgpu::Color::TRANSPARENT),
+                scale,
+            );
+            let pixels = renderer
+                .wgpu_device
+                .read_rgba8_texture(&output, width, width);
+            let sample = |x: u32, y: u32| {
+                let i = ((y * width + x) * 4) as usize;
+                [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+            };
+            let inside = sample((8.0 * scale) as u32, (8.0 * scale) as u32);
+            let outside = sample((2.0 * scale) as u32, (2.0 * scale) as u32);
+            let edge_before = sample((4.0 * scale) as u32 - 1, (8.0 * scale) as u32);
+            let edge_inside = sample((4.0 * scale) as u32, (8.0 * scale) as u32);
+            let near = |actual: [u8; 4], expected: [u8; 4]| {
+                actual
+                    .into_iter()
+                    .zip(expected)
+                    .all(|(a, e)| a.abs_diff(e) <= 2)
+            };
+            assert!(near(inside, [191, 64, 0, 255]), "scale {scale}: expected group alpha applied after premultiplied source conversion, got {inside:?}");
+            assert!(
+                near(outside, [255, 0, 0, 255]),
+                "scale {scale}: clip leaked image outside layer, got {outside:?}"
+            );
+            assert!(near(edge_before, [255, 0, 0, 255]) && near(edge_inside, [191, 64, 0, 255]), "scale {scale}: physical clip edge was not sharp: {edge_before:?} -> {edge_inside:?}");
+        }
+
+        handles.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &source,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[0, 0, 255, 255].repeat(16),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(16),
+                rows_per_image: Some(4),
+            },
+            wgpu::Extent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 1,
+            },
+        );
+        renderer.stage_external_image(key, &source_view, [4, 4], SourceAlpha::Premultiplied, 2);
+        let (refresh_output, refresh_view) = target(&handles.device, 16, 16);
+        renderer.render_vello_scaled(
+            &scene,
+            &refresh_view,
+            ColorLoad::Clear(wgpu::Color::TRANSPARENT),
+            1.0,
+        );
+        let refreshed = renderer
+            .wgpu_device
+            .read_rgba8_texture(&refresh_output, 16, 16);
+        let refreshed_center =
+            &refreshed[((8 * 16 + 8) * 4) as usize..((8 * 16 + 8) * 4 + 4) as usize];
+        assert!(refreshed_center
+            .iter()
+            .copied()
+            .zip([128, 0, 128, 255])
+            .all(|(a, e)| a.abs_diff(e) <= 2), "same-size generation refresh must not retain the prior atlas pixels: {refreshed_center:?}");
+
+        let resized = producer(&handles.device, &handles.queue, 8, 4, [0, 0, 255, 255]);
+        let resized_view = resized.create_view(&Default::default());
+        renderer.stage_external_image(key, &resized_view, [8, 4], SourceAlpha::Premultiplied, 3);
+        let (resize_output, resize_view) = target(&handles.device, 16, 16);
+        renderer.render_vello_scaled(
+            &scene,
+            &resize_view,
+            ColorLoad::Clear(wgpu::Color::TRANSPARENT),
+            1.0,
+        );
+        let resized_pixels = renderer
+            .wgpu_device
+            .read_rgba8_texture(&resize_output, 16, 16);
+        let resized_center =
+            &resized_pixels[((8 * 16 + 8) * 4) as usize..((8 * 16 + 8) * 4 + 4) as usize];
+        assert!(resized_center
+            .iter()
+            .copied()
+            .zip([128, 0, 128, 255])
+            .all(|(a, e)| a.abs_diff(e) <= 2), "resize must replace the ImageData and invalidate lowered scene caches: {resized_center:?}");
+        renderer.unregister_external_image(key);
+        let (removed_output, removed_view) = target(&handles.device, 16, 16);
+        renderer.render_vello_scaled(
+            &scene,
+            &removed_view,
+            ColorLoad::Clear(wgpu::Color::TRANSPARENT),
+            1.0,
+        );
+        let removed = renderer
+            .wgpu_device
+            .read_rgba8_texture(&removed_output, 16, 16);
+        assert_eq!(
+            &removed[((8 * 16 + 8) * 4) as usize..((8 * 16 + 8) * 4 + 4) as usize],
+            &[255, 0, 0, 255],
+            "retired image must not leave a stale Vello override"
+        );
+        assert!(!renderer.unregister_external_image(key));
+    }
 
     #[test]
     fn invalidating_a_surface_drops_only_its_retained_tile_state() {

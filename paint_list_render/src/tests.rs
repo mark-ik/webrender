@@ -468,7 +468,7 @@ fn push_clip_rect_emits_clipped_layer() {
 }
 
 #[test]
-fn external_texture_routes_to_external_textures_vec() {
+fn external_texture_stages_an_in_order_scene_image() {
     use paint_list_api::ExternalTextureItem;
     let list = list_with(
         DeviceIntSize::new(800, 600),
@@ -479,13 +479,62 @@ fn external_texture_routes_to_external_textures_vec() {
             content_generation: None,
         })],
     );
-    // External texture metadata lives on the full-shape translator
-    // output; use translate_paint_cmd_stream to inspect it.
     let out = translate_paint_cmd_stream(list.viewport, &list.commands, &[], &[]);
-    // External texture doesn't add to scene.ops; it goes into the
-    // separate compositor vector via the PM-3 lowering contract.
-    assert_eq!(out.scene.ops.len(), 0);
+    let image = match &out.scene.ops[..] {
+        [netrender::SceneOp::Image(image)] => image,
+        other => panic!("expected one in-order external image, got {other:?}"),
+    };
     assert_eq!(out.external_textures.len(), 1);
     assert_eq!(out.external_textures[0].texture_key, 0xC0FFEE);
     assert_eq!(out.external_textures[0].scene_op_boundary, 0);
+    assert_eq!(image.key, out.external_textures[0].image_key);
+    assert_eq!(image.color, [0.75; 4]);
+}
+
+#[test]
+fn external_texture_keeps_the_active_transform_and_layer_scope() {
+    use paint_list_api::{ExternalTextureItem, LayerSpec, TransformKind, TransformSpec};
+
+    let list = list_with(
+        DeviceIntSize::new(160, 120),
+        vec![
+            PaintCmd::PushTransform(TransformSpec {
+                origin: LayoutPoint::new(0.0, 0.0),
+                transform: paint_list_api::LayoutTransform::translation(12.0, 8.0, 0.0),
+                kind: TransformKind::Standard,
+            }),
+            PaintCmd::PushClip(paint_list_api::ClipSpec {
+                kind: paint_list_api::ClipKind::Rect(box2d(0.0, 0.0, 64.0, 48.0)),
+            }),
+            PaintCmd::PushLayer(LayerSpec {
+                opacity: 0.5,
+                ..LayerSpec::default()
+            }),
+            PaintCmd::DrawExternalTexture(ExternalTextureItem {
+                placement: placement_at(box2d(4.0, 6.0, 20.0, 10.0)),
+                texture_key: 77,
+                opacity: 1.0,
+                content_generation: None,
+            }),
+            PaintCmd::PopLayer,
+            PaintCmd::PopClip,
+            PaintCmd::PopTransform,
+        ],
+    );
+
+    let out = translate_paint_cmd_stream(list.viewport, &list.commands, &[], &[]);
+    let image = out
+        .scene
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            netrender::SceneOp::Image(image) => Some(image),
+            _ => None,
+        })
+        .expect("external image");
+    assert_ne!(image.transform_id, 0, "canvas inherits its CTM");
+    assert_eq!(image.color, [1.0; 4], "layer owns element opacity");
+    assert!(matches!(out.scene.ops[0], netrender::SceneOp::PushLayer(_)));
+    assert!(matches!(out.scene.ops[1], netrender::SceneOp::PushLayer(_)));
+    assert_eq!(out.external_textures[0].scene_op_boundary, 2);
 }

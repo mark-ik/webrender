@@ -71,6 +71,16 @@ pub(crate) struct RetainedState {
 }
 
 impl RetainedState {
+    /// Drop the whole-master shortcut when an external image receives a new
+    /// Vello identity or is retired. Its frame signature contains image keys,
+    /// not override identities.
+    pub(crate) fn invalidate_image_override_cache(&mut self) {
+        self.cached_master = None;
+        for fragment in self.fragments.values_mut() {
+            fragment.lowered = None;
+        }
+    }
+
     pub(crate) fn register(&mut self, fragment: SceneFragment) -> FragmentId {
         let id = self.next_id;
         self.next_id += 1;

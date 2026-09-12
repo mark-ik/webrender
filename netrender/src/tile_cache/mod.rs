@@ -111,6 +111,19 @@ impl TileCache {
         self.tiles.len()
     }
 
+    /// Forget all dependency hashes and cached tile coordinates.
+    ///
+    /// A GPU image override whose dimensions change receives a new Vello
+    /// `ImageData` identity. The scene op still contains the same `ImageKey`,
+    /// so its ordinary dependency hash cannot observe that replacement. The
+    /// owner uses this narrow reset before the next frame to make every tile
+    /// rebuild against the new image identity.
+    pub(crate) fn clear(&mut self) {
+        self.tiles.clear();
+        self.frame_index = FrameIndex::default();
+        self.dirty_count_last_invalidate = 0;
+    }
+
     /// Roadmap A3 — return tiles that became dirty within the last
     /// `window_frames` invalidate calls, paired with an `age_frac` in
     /// `[0.0, 1.0]` where `0.0` means dirtied this frame and `1.0`

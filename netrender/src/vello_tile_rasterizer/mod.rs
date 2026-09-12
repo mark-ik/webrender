@@ -383,6 +383,36 @@ impl VelloTileRasterizer {
         }
     }
 
+    /// Replace the backing GPU texture while preserving Vello's `ImageData`
+    /// identity. This is the correct update path for a same-sized source: tile
+    /// and retained scenes keep referring to that identity, and Vello is told
+    /// to copy the fresh pixels into its atlas on the next render.
+    pub fn refresh_texture(&mut self, key: ImageKey, texture: wgpu::Texture) -> bool {
+        let Some(image) = self.image_overrides.get(&key) else {
+            return false;
+        };
+        self.vello_renderer.override_image(
+            image,
+            Some(wgpu::TexelCopyTextureInfoBase {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            }),
+        );
+        self.vello_renderer.mark_override_image_dirty(image);
+        true
+    }
+
+    /// Invalidate lowered scene caches after an image override gains a new
+    /// `ImageData` identity or is retired. The `ImageKey` embedded in a scene
+    /// is intentionally stable, so neither the tile hash nor the retained
+    /// fragment signature can otherwise observe this resource replacement.
+    pub(crate) fn invalidate_image_override_caches(&mut self) {
+        self.tile_scenes.clear();
+        self.retained.invalidate_image_override_cache();
+    }
+
     /// Number of tiles whose Scenes were rebuilt by the last
     /// `render` call. Useful for tile-cache hit-rate assertions.
     pub fn last_dirty_count(&self) -> usize {

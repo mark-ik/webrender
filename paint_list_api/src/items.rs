@@ -309,21 +309,14 @@ pub enum AlphaType {
 // External texture — PM-3 lowering contract lives in the docstring
 // =============================================================================
 
-/// Same-device producer texture composited into the frame.
+/// Same-device producer texture drawn at its normal paint position.
 ///
-/// **PM-3 lowering contract.** The renderer lowers this to the per-frame
-/// compositor pass (`ExternalTextureComposite` with `scene_op_boundary`,
-/// landed in netrender 2026-05-16), **not** a vello `SceneOp::Image`.
-/// This sidesteps tile-cache invalidation for mutating textures (WebGL
-/// canvas, embedded iframes, paint worklet output, etc.) by
-/// construction: the compositor pass reads the texture view at frame
-/// composite time, so producer redraws are picked up without Scene
-/// mutation.
-///
-/// The actual `wgpu::Texture` is registered with the renderer's external-
-/// texture registry out-of-band — GPU handles are not IPC payloads.
-/// The display list carries only the stable producer-side `texture_key`
-/// and placement metadata.
+/// The renderer translates this to an in-order `SceneImage`; the host stages
+/// the live `wgpu::TextureView` under a derived renderer image key before the
+/// frame. That keeps the active transform, clip, and opacity layer scopes.
+/// GPU handles never enter the serializable paint list. A mutating producer
+/// advances its staging generation so the renderer refreshes its imported
+/// image and invalidates affected tiles.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ExternalTextureItem {
     pub placement: CommonPlacement,
